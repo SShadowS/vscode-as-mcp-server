@@ -36,7 +36,7 @@ class MCPRelay {
           id: Math.floor(Math.random() * 1000000),
         } as JSONRPCRequest));
         const parsedResponse = resp as JSONRPCResponse;
-        tools = parsedResponse.result.tools as any[];
+        tools = this.fixToolSchemas(parsedResponse.result.tools as any[]);
       } catch (err) {
         return;
       }
@@ -75,7 +75,7 @@ class MCPRelay {
           id: Math.floor(Math.random() * 1000000),
         } as JSONRPCRequest));
         const parsedResponse = response as JSONRPCResponse;
-        tools = parsedResponse.result.tools as any[];
+        tools = this.fixToolSchemas(parsedResponse.result.tools as any[]);
       } catch (err) {
         console.error(`Failed to fetch tools list: ${(err as Error).message}`);
         return { tools: cachedTools as any[] };
@@ -186,6 +186,29 @@ class MCPRelay {
     throw new Error(`All retry attempts failed: ${lastError?.message}`);
   }
 
+  // Fix tool schemas to ensure JSON Schema 2020-12 compatibility
+  private fixToolSchemas(tools: any[]): any[] {
+    return tools.map(tool => {
+      if (tool.inputSchema) {
+        // Ensure schema has the correct $schema field
+        if (!tool.inputSchema.$schema) {
+          tool.inputSchema.$schema = "https://json-schema.org/draft/2020-12/schema";
+        } else if (tool.inputSchema.$schema.includes('draft-07')) {
+          tool.inputSchema.$schema = "https://json-schema.org/draft/2020-12/schema";
+        }
+      } else {
+        // Add default schema if missing entirely
+        tool.inputSchema = {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+          $schema: "https://json-schema.org/draft/2020-12/schema"
+        };
+      }
+      return tool;
+    });
+  }
+
   start() {
     return this.mcpServer.connect(new StdioServerTransport());
   }
@@ -194,7 +217,28 @@ class MCPRelay {
 // コマンドライン引数の解析
 function parseArgs() {
   const args = process.argv.slice(2);
-  let serverUrl = 'http://localhost:60100';
+  
+  // Default to Windows host IP for WSL environments
+  let serverUrl = 'http://10.255.255.254:60100';
+  
+  // Check if we're in WSL and get the Windows host IP dynamically
+  try {
+    const fs = require('fs');
+    const resolvConf = fs.readFileSync('/etc/resolv.conf', 'utf8');
+    const hostIpMatch = resolvConf.match(/nameserver\s+(\d+\.\d+\.\d+\.\d+)/);
+    if (hostIpMatch) {
+      serverUrl = `http://${hostIpMatch[1]}:60100`;
+    }
+    // Try alternative common WSL IPs if resolv.conf doesn't work
+    if (!hostIpMatch) {
+      // Common WSL bridge IPs
+      const commonIPs = ['172.18.64.1', '172.19.0.1', '172.23.48.1'];
+      serverUrl = `http://${commonIPs[0]}:60100`; // Use first as default
+    }
+  } catch (err) {
+    // If we can't read resolv.conf, fall back to localhost (non-WSL environment)
+    serverUrl = 'http://localhost:60100';
+  }
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--server-url' && i + 1 < args.length) {

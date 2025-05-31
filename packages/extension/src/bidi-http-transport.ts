@@ -3,6 +3,7 @@ import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import * as http from 'node:http';
 import * as vscode from 'vscode';
+import packageJson from '../package.json';
 
 export class BidiHttpTransport implements Transport {
   onclose?: () => void;
@@ -107,6 +108,18 @@ export class BidiHttpTransport implements Transport {
       res.send(response);
     });
 
+    app.get('/version', (_req: express.Request, res: express.Response) => {
+      this.outputChannel.appendLine('Received version request');
+      const response = {
+        version: packageJson.version,
+        name: packageJson.name,
+        displayName: packageJson.displayName,
+        timestamp: new Date().toISOString()
+      };
+
+      res.send(response);
+    });
+
     // Endpoint to handle handover requests
     app.post('/request-handover', express.json(), (_req: express.Request, res: express.Response) => {
       this.outputChannel.appendLine('Received handover request');
@@ -172,10 +185,11 @@ export class BidiHttpTransport implements Transport {
     const startServer = (port: number): Promise<number> => {
       console.trace('Starting server on port: ' + port);
       return new Promise((resolve, reject) => {
-        const server = app.listen(port)
+        // Listen on all interfaces (0.0.0.0) to allow WSL access from Windows
+        const server = app.listen(port, '0.0.0.0')
           .once('listening', () => {
             this.httpServer = server; // Store server instance
-            this.outputChannel.appendLine(`MCP Server running at :${port}`);
+            this.outputChannel.appendLine(`MCP Server running at 0.0.0.0:${port} (accessible from WSL)`);
             resolve(port);
           })
           .once('error', (err: NodeJS.ErrnoException) => {

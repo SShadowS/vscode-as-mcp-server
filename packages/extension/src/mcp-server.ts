@@ -94,17 +94,57 @@ export class ToolRegistry {
       tools: {},
     });
 
-    this.server.setRequestHandler(ListToolsRequestSchema, (): ListToolsResult => ({
-      tools: Object.entries(this._registeredTools).map(([name, tool]): Tool => ({
-        name,
-        description: tool.description,
-        inputSchema: tool.inputSchema
-          ?? (tool.inputZodSchema && (zodToJsonSchema(tool.inputZodSchema, {
+    this.server.setRequestHandler(ListToolsRequestSchema, (): ListToolsResult => {
+      const tools = Object.entries(this._registeredTools).map(([name, tool], index): Tool => {
+        let inputSchema = tool.inputSchema;
+        
+        if (!inputSchema && tool.inputZodSchema) {
+          inputSchema = zodToJsonSchema(tool.inputZodSchema, {
+            target: "jsonSchema2019-09",
             strictUnions: true,
-          }) as Tool["inputSchema"]))
-          ?? { type: "object" as const },
-      })),
-    }));
+          }) as Tool["inputSchema"];
+          
+          // Ensure JSON Schema 2020-12 compatibility
+          if (inputSchema && typeof inputSchema === 'object') {
+            inputSchema.$schema = "https://json-schema.org/draft/2020-12/schema";
+          }
+        }
+        
+        if (!inputSchema) {
+          inputSchema = { type: "object" as const, $schema: "https://json-schema.org/draft/2020-12/schema" };
+        }
+        
+        // Convert existing schemas with old draft-07 format to 2020-12
+        if (inputSchema && typeof inputSchema === 'object' && inputSchema.$schema && typeof inputSchema.$schema === 'string') {
+          if (inputSchema.$schema.includes('draft-07') || inputSchema.$schema.includes('draft/2019-09')) {
+            inputSchema = { ...inputSchema, $schema: "https://json-schema.org/draft/2020-12/schema" };
+          }
+        }
+        
+        // Ensure all schemas have the correct $schema property
+        if (inputSchema && typeof inputSchema === 'object' && !inputSchema.$schema) {
+          inputSchema.$schema = "https://json-schema.org/draft/2020-12/schema";
+        }
+        
+        // Debug logging for tool #22 (0-indexed, so tool 21)
+        if (index === 21) {
+          console.log(`[DEBUG] Tool #22 (${name}):`, JSON.stringify(inputSchema, null, 2));
+        }
+        
+        return {
+          name,
+          description: tool.description,
+          inputSchema,
+        };
+      });
+      
+      console.log(`[DEBUG] Total tools registered: ${tools.length}`);
+      tools.forEach((tool, index) => {
+        console.log(`[DEBUG] Tool ${index}: ${tool.name}`);
+      });
+      
+      return { tools };
+    });
 
     this.server.setRequestHandler(
       CallToolRequestSchema,
